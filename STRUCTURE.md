@@ -10,7 +10,8 @@ universal-deep-research/
 ├── tools.py               # Search and LLM interface utilities
 ├── strategies.py          # Built-in strategy examples (minimal, expansive, intensive)
 ├── examples.py            # Usage examples and demonstrations
-└── tests.py               # All tests in single file
+├── tests.py               # All tests in single file
+└── reproduce_paper_results.py # Reproduce paper results (Appendix B)
 ```
 
 **Design Principles Applied:**
