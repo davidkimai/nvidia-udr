@@ -1,0 +1,25 @@
+# Universal Deep Research - Minimal Dependencies
+# Core functionality requirements only
+
+# Standard library modules used:
+# - datetime, json, re, math, ast, time, signal, contextlib
+# - unittest, sys, io, urllib.parse, abc, typing
+# - No external dependencies required for basic functionality
+
+# Optional dependencies for production use:
+# Uncomment and install as needed for specific backends
+
+# For OpenAI LLM integration:
+# openai>=1.0.0
+
+# For web requests (Brave Search API):
+# requests>=2.25.0
+
+# For development and testing:
+# pytest>=6.0.0
+# pytest-cov>=2.10.0
+
+# Note: The system is designed to work with mock implementations
+# by default, requiring no external dependencies for testing
+# and development. Install optional dependencies only when
+# integrating with real LLM and search services.
