@@ -28,10 +28,75 @@ for notification in quick_research("benefits of renewable energy", "minimal"):
 ## Installation
 
 ```bash
-git clone https://github.com/davidkimai/universal-deep-research
+git clone https://github.com/your-username/universal-deep-research
 cd universal-deep-research
 pip install -r requirements.txt
 ```
+
+## Security Model
+
+**CRITICAL**: UDR generates and executes user-defined code. Understanding the security model is essential for safe deployment.
+
+### Development Environment (Default)
+- Uses AST-based validation to check for dangerous imports and function calls
+- Restricted global namespace removes dangerous builtins (`exec`, `eval`, `open`, etc.)
+- Timeout protection prevents infinite loops
+- **Suitable for**: Development, testing, trusted users, research reproduction
+
+### Production Environment (Recommended)
+For production deployment with untrusted strategies, implement additional sandboxing:
+
+```python
+# Example production setup with enhanced isolation
+from udr import UDR
+import subprocess
+import tempfile
+
+def production_execute_strategy(strategy, prompt):
+    # Write strategy to temporary file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        f.write(generated_code)
+        temp_file = f.name
+    
+    # Execute in isolated container/VM
+    result = subprocess.run([
+        'docker', 'run', '--rm', '--network=none',
+        '--memory=512m', '--cpus=0.5',
+        'python:3.9-slim', 'python', temp_file
+    ], capture_output=True, timeout=300)
+    
+    return result.stdout.decode()
+```
+
+### Security Validation Layers
+1. **Strategy Text Analysis**: Validates strategy structure and complexity
+2. **Code Generation Constraints**: LLM prompted with security requirements
+3. **AST Security Check**: Scans generated code for dangerous patterns
+4. **Execution Environment**: Restricted globals and timeout protection
+5. **Runtime Monitoring**: Notification validation and error handling
+
+### Security Considerations
+- **Trusted Strategies Only**: Default setup assumes trusted strategy authors
+- **LLM Prompt Injection**: Generated code quality depends on underlying LLM robustness
+- **Resource Limits**: Implement memory/CPU limits for production use
+- **Network Isolation**: Consider disabling network access for untrusted code
+
+## Research Reproducibility
+
+### Paper Result Reproduction
+Reproduce the exact results from the original research paper:
+
+```bash
+python reproduce_paper_results.py
+```
+
+This script generates reports for all examples in Appendix B, enabling direct comparison with paper outputs.
+
+### Validation Methodology
+1. Execute built-in strategies with paper's exact prompts
+2. Compare output structure and content quality
+3. Measure performance characteristics (timing, complexity)
+4. Validate notification sequences and error handling
 
 ## Core Features
 
@@ -46,11 +111,27 @@ pip install -r requirements.txt
 - **Expansive**: Topic-based search with multiple phrases per topic (5-15 minutes)  
 - **Intensive**: Iterative 2-phase search with phrase refinement (15-30 minutes)
 
-### Security Features
+### Strategy Library Features
 
-- Sandboxed code execution prevents host system access
-- Validation of generated code for security violations
-- Timeout protection for long-running strategies
+Advanced strategy management and customization:
+
+```python
+from strategies import StrategyLibrary
+
+library = StrategyLibrary()
+
+# Search strategies by complexity or domain
+strategies = library.search_strategies(complexity="medium", domain="technology")
+
+# Modify existing strategies
+modified = library.modify_strategy("minimal", 
+                                 search_phrases=5, 
+                                 add_validation=True)
+
+# Combine strategies
+hybrid = library.combine_strategies(["minimal", "expansive"], 
+                                  merge_mode="sequential")
+```
 
 ## Usage Examples
 
@@ -98,72 +179,70 @@ for notification in custom_research(custom_strategy, prompt):
         break
 ```
 
-### Advanced Configuration
+### Production Configuration with Security
 
 ```python
 from udr import UDR
 from tools import create_search_tool, create_llm_interface
 
-# Configure custom tools
+# Configure with production security settings
 search_tool = create_search_tool(backend="brave", api_key="your-api-key")
 llm_interface = create_llm_interface(provider="openai", api_key="your-api-key")
 
-# Initialize with custom configuration
 udr = UDR(
     llm_interface=llm_interface,
     search_tool=search_tool,
-    execution_timeout=1800  # 30 minutes
+    execution_timeout=900  # 15 minutes max
 )
 
-# Use intensive strategy for comprehensive research
-strategy = udr.get_builtin_strategy("intensive")
-prompt = "Climate change impact on global food security"
+# Additional security validation
+strategy = "Your custom strategy here"
+validation = udr.validate_strategy(strategy)
 
+if not validation['valid']:
+    raise SecurityError(f"Strategy failed validation: {validation['details']}")
+
+# Safe execution with monitoring
 for notification in udr.research(strategy, prompt):
-    print(f"[{notification['timestamp']}] {notification['description']}")
+    # Log all notifications for audit trail
+    log_security_event(notification)
+    
     if notification['type'] == 'final_report':
         break
 ```
 
-### Strategy Validation
+### Strategy Library Advanced Usage
 
 ```python
-from udr import UDR
+from strategies import StrategyLibrary
 
-udr = UDR()
+library = StrategyLibrary()
 
-# Validate strategy before execution
-custom_strategy = "1. Search for information\n2. Generate report"
-validation = udr.validate_strategy(custom_strategy)
+# Search and filter strategies
+tech_strategies = library.search_strategies(
+    domain="technology",
+    complexity="medium",
+    max_time="15 minutes"
+)
 
-if validation['valid']:
-    print("Strategy is valid and ready for execution")
-else:
-    print(f"Strategy validation failed: {validation['details']}")
-```
+# Create template from existing strategy
+template = library.create_template("expansive", 
+                                 customizable_fields=["search_phrases", "topics"])
 
-### Batch Processing
+# Modify strategy parameters
+custom_strategy = library.modify_strategy(
+    base_strategy="minimal",
+    search_phrases=5,
+    add_cross_validation=True,
+    report_format="academic"
+)
 
-```python
-from udr import quick_research
-
-queries = [
-    "Remote work productivity trends",
-    "Sustainable packaging solutions", 
-    "Cybersecurity in IoT devices"
-]
-
-results = []
-for query in queries:
-    for notification in quick_research(query, "minimal"):
-        if notification['type'] == 'final_report':
-            results.append({
-                'query': query,
-                'report': notification['report']
-            })
-            break
-
-print(f"Processed {len(results)} research queries")
+# Combine multiple strategies
+hybrid_strategy = library.combine_strategies(
+    strategies=["minimal", "expansive"],
+    merge_mode="parallel",  # Execute searches in parallel
+    aggregation="weighted"  # Weight results by strategy complexity
+)
 ```
 
 ## API Reference
@@ -185,7 +264,7 @@ class UDR:
 
 #### StrategyProcessor
 
-Converts natural language strategies to executable code.
+Converts natural language strategies to executable code with security validation.
 
 ```python
 class StrategyProcessor:
@@ -201,6 +280,18 @@ Executes generated strategy code in sandboxed environment.
 class StrategyExecutor:
     def execute(self, code: str, context: Dict) -> Generator
     def validate_code(self, code: str) -> Dict
+```
+
+#### StrategyLibrary
+
+Advanced strategy management and customization.
+
+```python
+class StrategyLibrary:
+    def search_strategies(self, **filters) -> List[Dict]
+    def modify_strategy(self, base_strategy: str, **modifications) -> str
+    def combine_strategies(self, strategies: List[str], **options) -> str
+    def create_template(self, base_strategy: str, **options) -> str
 ```
 
 ### Tool Interfaces
@@ -223,20 +314,6 @@ Abstract interface for language models.
 class LLMInterface:
     def generate(self, prompt: str, **kwargs) -> str
     def get_model_info(self) -> Dict
-```
-
-### Convenience Functions
-
-```python
-# Quick research with built-in strategies
-quick_research(prompt: str, strategy_name: str = "minimal") -> Generator
-
-# Custom strategy research
-custom_research(strategy: str, prompt: str) -> Generator
-
-# Tool creation utilities
-create_search_tool(backend: str = "mock", api_key=None) -> SearchTool
-create_llm_interface(provider: str = "mock", **kwargs) -> LLMInterface
 ```
 
 ## Built-in Strategy Examples
@@ -274,6 +351,13 @@ Custom strategies are written in natural language and automatically converted to
 5. [Report generation] - Create final research report
 ```
 
+### Security Guidelines
+- Avoid references to file system operations
+- Do not request network access beyond provided tools
+- Keep computational complexity reasonable
+- Include error handling for failed searches
+- Validate all external data before processing
+
 ### Best Practices
 - Use numbered steps for clear structure
 - Include progress notifications for user feedback
@@ -281,60 +365,91 @@ Custom strategies are written in natural language and automatically converted to
 - Define report format and content requirements
 - Handle error cases and edge conditions
 
-### Example Custom Strategy
-```
-1. Send notification that custom research has started
-2. Analyze the research prompt to identify 3 key subtopics
-3. For each subtopic, generate 2 specific search phrases
-4. Execute searches systematically, collecting and categorizing results
-5. Cross-reference findings across subtopics to identify patterns
-6. Generate structured report with executive summary and detailed findings
-7. Include source citations and confidence levels for each claim
-```
-
 ## Architecture
 
 ### Two-Phase Operation
 1. **Phase 1 - Strategy Processing**: Natural language strategy → executable Python code
 2. **Phase 2 - Strategy Execution**: Code execution in sandboxed environment
 
+### Security Architecture
+```
+Natural Language Strategy
+         ↓
+Strategy Text Validation
+         ↓
+LLM Code Generation (with constraints)
+         ↓
+AST Security Analysis
+         ↓
+Code Structure Validation
+         ↓
+Sandboxed Execution Environment
+         ↓
+Runtime Monitoring & Timeout
+         ↓
+Validated Notifications
+```
+
 ### Key Components
 - **Strategy Processor**: LLM-powered code generation with validation
 - **Strategy Executor**: Sandboxed execution with timeout protection
 - **Tool Interfaces**: Pluggable search and LLM backends
-- **Security Layer**: Code validation and execution isolation
-
-### Design Principles
-- **Model Agnostic**: Works with any sufficiently capable language model
-- **Tool Agnostic**: Supports multiple search and LLM backends
-- **Security First**: Sandboxed execution prevents system access
-- **User Controlled**: Complete customization of research methodology
+- **Security Layer**: Multi-layer validation and execution isolation
+- **Strategy Library**: Advanced strategy management and customization
 
 ## Configuration
 
-### Search Backends
-- **Mock**: Development and testing (default)
-- **Brave**: Brave Search API integration
-- **Custom**: Implement SearchTool interface
+### Development Setup (Default)
+```python
+# Mock implementations for development
+from udr import UDR
 
-### LLM Providers
-- **Mock**: Development and testing (default)
-- **OpenAI**: GPT-3.5/GPT-4 integration
-- **Custom**: Implement LLMInterface interface
+udr = UDR()  # Uses mock tools by default
+```
+
+### Production Setup
+```python
+# Real services with enhanced security
+from udr import UDR
+from tools import create_search_tool, create_llm_interface
+
+search_tool = create_search_tool(backend="brave", api_key="your-key")
+llm_interface = create_llm_interface(provider="openai", api_key="your-key")
+
+udr = UDR(
+    llm_interface=llm_interface,
+    search_tool=search_tool,
+    execution_timeout=900  # Shorter timeout for production
+)
+```
 
 ### Environment Variables
 ```bash
-# Optional API keys for production use
+# API keys for production backends
 export BRAVE_API_KEY="your-brave-search-api-key"
 export OPENAI_API_KEY="your-openai-api-key"
+
+# Security settings
+export UDR_EXECUTION_TIMEOUT="900"
+export UDR_MAX_SEARCH_RESULTS="10"
+export UDR_ENABLE_AUDIT_LOG="true"
 ```
 
-## Testing
+## Testing and Validation
 
-Run the comprehensive test suite:
-
+### Run Test Suite
 ```bash
 python tests.py
+```
+
+### Reproduce Paper Results
+```bash
+python reproduce_paper_results.py
+```
+
+### Security Testing
+```bash
+python test_security.py
 ```
 
 Test categories:
@@ -343,13 +458,15 @@ Test categories:
 - Tool interfaces and backends
 - Integration and error handling
 - Performance and reliability
+- Security validation and isolation
 
 ## Limitations
 
 1. **Code Generation Dependence**: Reliability depends on underlying LLM quality
-2. **Strategy Design Complexity**: Users must create logically sound strategies
-3. **Limited Real-time Interaction**: No mid-execution strategy modification
-4. **Mock Implementations**: Default tools are for development only
+2. **Security Model**: Default setup assumes trusted strategy authors
+3. **Strategy Design Complexity**: Users must create logically sound strategies
+4. **Limited Real-time Interaction**: No mid-execution strategy modification
+5. **Production Sandboxing**: Requires additional infrastructure for untrusted code
 
 ## Contributing
 
@@ -358,6 +475,13 @@ Test categories:
 3. Commit changes (`git commit -m 'Add amazing feature'`)
 4. Push to branch (`git push origin feature/amazing-feature`)
 5. Open Pull Request
+
+### Security Contributions
+When contributing security-related features:
+- Follow the multi-layer validation approach
+- Include comprehensive test cases
+- Document security implications
+- Consider both development and production use cases
 
 ## License
 
@@ -380,4 +504,4 @@ If you use this work in research, please cite:
 
 Based on the research paper "Universal Deep Research: Bring Your Own Model and Strategy" by Peter Belcak and Pavlo Molchanov from NVIDIA Research.
 
-This implementation provides a practical, accessible version of the UDR system described in the paper, with focus on ease of use and extensibility.
+This implementation provides a practical, accessible version of the UDR system described in the paper, with focus on ease of use, security, and research reproducibility.
