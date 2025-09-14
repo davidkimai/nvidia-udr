@@ -1,377 +1,269 @@
 """
-Strategy Executor - Sandboxed execution of generated research strategy code.
-Handles Phase 2 of UDR operation with security constraints and state management.
+Strategy Processor - Converts natural language research strategies to executable code.
+Core component of the UDR two-phase operation system.
 """
 
-import ast
-import sys
-import traceback
-import signal
-from contextlib import contextmanager
-from typing import Dict, Any, Generator, Optional
-from datetime import datetime
+import re
+from typing import Optional
+from tools import LLMInterface
 
 
-class ExecutionTimeout(Exception):
-    """Raised when strategy execution exceeds timeout limit."""
-    pass
-
-
-class StrategyExecutor:
+class StrategyProcessor:
     """
-    Executes generated research strategy code in controlled environment 
-    with timeout protection and security constraints.
+    Converts user-defined natural language research strategies into executable 
+    Python code with proper structure and constraints.
     """
     
-    def __init__(self, timeout: int = 3600):
+    def __init__(self, llm_interface: Optional[LLMInterface] = None):
         """
-        Initialize strategy executor.
+        Initialize strategy processor.
         
         Args:
-            timeout: Maximum execution time in seconds
+            llm_interface: Language model interface for code generation
         """
-        self.timeout = timeout
-        self.restricted_modules = {
-            'subprocess', 'os', 'sys', 'shutil', 'socket', 'urllib',
-            'http', 'ftplib', 'smtplib', 'telnetlib', 'exec', 'eval'
-        }
+        self.llm_interface = llm_interface or LLMInterface()
         
-    def execute(self, 
-                code: str, 
-                context: Dict[str, Any]) -> Generator[Dict[str, Any], None, None]:
+    def process_strategy(self, strategy: str) -> str:
         """
-        Execute strategy code with provided context.
+        Convert natural language strategy to executable Python code.
         
         Args:
-            code: Python code to execute
-            context: Execution context with tools and parameters
+            strategy: Natural language description of research strategy
             
-        Yields:
-            Dict: Progress notifications from strategy execution
+        Returns:
+            str: Python code implementing the strategy as a generator function
             
         Raises:
-            ExecutionTimeout: If execution exceeds timeout
-            ValueError: If code execution fails
+            ValueError: If strategy is invalid or code generation fails
         """
-        # Validate code before execution
-        validation = self.validate_code(code)
-        if not validation['valid']:
-            raise ValueError(f"Code validation failed: {validation['details']}")
+        if not strategy.strip():
+            raise ValueError("Strategy cannot be empty")
+            
+        # Generate code using LLM with structured prompt
+        code_prompt = self._build_code_generation_prompt(strategy)
+        generated_code = self.llm_interface.generate(code_prompt)
         
-        # Prepare secure execution environment
-        exec_globals = self._build_execution_globals(context)
-        exec_locals = {}
+        # Clean and validate generated code
+        clean_code = self._clean_generated_code(generated_code)
+        self._validate_generated_code(clean_code)
         
-        try:
-            with self._timeout_context(self.timeout):
-                # Execute code to define the strategy function
-                exec(code, exec_globals, exec_locals)
-                
-                # Get the strategy function
-                if 'execute_strategy' not in exec_locals:
-                    raise ValueError("Code must define 'execute_strategy' function")
-                
-                strategy_func = exec_locals['execute_strategy']
-                
-                # Execute strategy and yield notifications
-                for notification in strategy_func(**context):
-                    # Validate notification format
-                    if not self._validate_notification(notification):
-                        continue
-                    yield notification
-                    
-        except ExecutionTimeout:
-            yield {
-                "type": "execution_timeout",
-                "description": f"Strategy execution exceeded {self.timeout} seconds",
-                "timestamp": datetime.now().isoformat()
-            }
-        except Exception as e:
-            yield {
-                "type": "execution_error",
-                "description": f"Strategy execution failed: {str(e)}",
-                "timestamp": datetime.now().isoformat(),
-                "error_details": traceback.format_exc()
-            }
+        return clean_code
     
-    def validate_code(self, code: str) -> Dict[str, Any]:
+    def _build_code_generation_prompt(self, strategy: str) -> str:
         """
-        Validate code for security and structural requirements.
+        Build structured prompt for code generation with constraints and examples.
         
         Args:
-            code: Python code to validate
+            strategy: Natural language research strategy
             
         Returns:
-            Dict: Validation results with 'valid' bool and 'details' str
+            str: Complete prompt for LLM code generation
         """
+        return f"""
+Convert the following research strategy into executable Python code.
+
+STRATEGY TO IMPLEMENT:
+{strategy}
+
+REQUIREMENTS:
+1. Create a generator function named 'execute_strategy' that yields progress notifications
+2. Function must accept: prompt (str), search_tool, llm_interface, and **kwargs
+3. Each notification must be a dictionary with 'type', 'description', 'timestamp' fields
+4. Use yield statements for all progress updates
+5. Final yield must have type 'final_report' with 'report' field containing the result
+6. Add explicit comments mapping each code section to strategy steps
+7. Handle errors gracefully with appropriate notifications
+
+AVAILABLE TOOLS:
+- search_tool.search(query) -> List[Dict] # Returns search results
+- llm_interface.generate(prompt) -> str # Generate text using language model
+- Standard Python libraries (json, datetime, etc.)
+
+CONSTRAINTS:
+- No external network calls except through provided tools
+- No file system access
+- No subprocess calls
+- No infinite loops
+- Include timestamp in each notification using datetime.now().isoformat()
+
+CODE STRUCTURE TEMPLATE:
+```python
+from datetime import datetime
+import json
+
+def execute_strategy(prompt, search_tool, llm_interface, **kwargs):
+    # Step 1 - [First strategy step description]
+    yield {{
+        "type": "step_started",
+        "description": "Starting first step...",
+        "timestamp": datetime.now().isoformat()
+    }}
+    
+    # Implementation for step 1
+    # ...
+    
+    # Continue for each strategy step
+    # ...
+    
+    # Final step - Generate and return report
+    yield {{
+        "type": "final_report",
+        "description": "Research completed",
+        "timestamp": datetime.now().isoformat(),
+        "report": final_report_content
+    }}
+```
+
+Generate ONLY the Python code implementing the strategy. Do not include explanations or markdown formatting.
+"""
+    
+    def _clean_generated_code(self, raw_code: str) -> str:
+        """
+        Clean and format generated code, removing markdown artifacts.
+        
+        Args:
+            raw_code: Raw code from LLM generation
+            
+        Returns:
+            str: Cleaned Python code
+        """
+        # Remove markdown code blocks
+        code = re.sub(r'```python\s*\n?', '', raw_code)
+        code = re.sub(r'```\s*$', '', code)
+        
+        # Remove leading/trailing whitespace
+        code = code.strip()
+        
+        # Ensure proper indentation
+        lines = code.split('\n')
+        if lines and not lines[0].startswith('from ') and not lines[0].startswith('import '):
+            # Add necessary imports if missing
+            imports = [
+                "from datetime import datetime",
+                "import json"
+            ]
+            code = '\n'.join(imports) + '\n\n' + code
+        
+        return code
+    
+    def _validate_generated_code(self, code: str) -> None:
+        """
+        Validate generated code structure and requirements.
+        
+        Args:
+            code: Generated Python code
+            
+        Raises:
+            ValueError: If code doesn't meet requirements
+        """
+        if not code.strip():
+            raise ValueError("Generated code is empty")
+            
+        # Check for required function
+        if 'def execute_strategy(' not in code:
+            raise ValueError("Generated code must contain 'execute_strategy' function")
+            
+        # Check for yield statements
+        if 'yield' not in code:
+            raise ValueError("Generated code must use yield statements for notifications")
+            
+        # Check for final report
+        if 'final_report' not in code:
+            raise ValueError("Generated code must include final_report notification")
+            
+        # Basic syntax check
         try:
-            # Parse code into AST for analysis
-            tree = ast.parse(code)
-            
-            # Check for security violations
-            security_check = self._check_security_violations(tree)
-            if not security_check['safe']:
-                return {
-                    'valid': False,
-                    'details': f"Security violation: {security_check['reason']}"
-                }
-            
-            # Check for required structure
-            structure_check = self._check_code_structure(tree)
-            if not structure_check['valid']:
-                return {
-                    'valid': False,
-                    'details': structure_check['reason']
-                }
-            
-            # Basic syntax validation
             compile(code, '<strategy>', 'exec')
-            
-            return {'valid': True, 'details': 'Code validation passed'}
-            
         except SyntaxError as e:
-            return {
-                'valid': False,
-                'details': f"Syntax error: {str(e)}"
-            }
-        except Exception as e:
-            return {
-                'valid': False,
-                'details': f"Validation error: {str(e)}"
-            }
+            raise ValueError(f"Generated code has syntax errors: {str(e)}")
     
-    def _build_execution_globals(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def validate_strategy_text(self, strategy: str) -> dict:
         """
-        Build restricted global namespace for code execution.
+        Validate strategy text before processing.
         
         Args:
-            context: Execution context with tools and parameters
+            strategy: Natural language strategy text
             
         Returns:
-            Dict: Safe global namespace for code execution
+            dict: Validation results with 'valid' bool and 'issues' list
         """
-        # Restricted builtins - remove dangerous functions
-        safe_builtins = {
-            name: getattr(__builtins__, name) 
-            for name in dir(__builtins__)
-            if not name.startswith('_') and name not in {
-                'exec', 'eval', 'compile', 'open', 'input', 
-                'raw_input', 'file', 'execfile', 'reload'
-            }
-        }
+        issues = []
         
-        # Add safe modules and context
-        exec_globals = {
-            '__builtins__': safe_builtins,
-            'datetime': __import__('datetime'),
-            'json': __import__('json'),
-            're': __import__('re'),
-            'math': __import__('math'),
-            **context  # Include search_tool, llm_interface, prompt, etc.
-        }
-        
-        return exec_globals
-    
-    def _check_security_violations(self, tree: ast.AST) -> Dict[str, Any]:
-        """
-        Check AST for security violations.
-        
-        Args:
-            tree: Parsed AST of code
+        if not strategy.strip():
+            issues.append("Strategy text is empty")
             
-        Returns:
-            Dict: Security check results
-        """
-        class SecurityVisitor(ast.NodeVisitor):
-            def __init__(self, restricted_modules):
-                self.violations = []
-                self.restricted_modules = restricted_modules
+        if len(strategy.split()) < 10:
+            issues.append("Strategy appears too brief for meaningful implementation")
             
-            def visit_Import(self, node):
-                for alias in node.names:
-                    if alias.name in self.restricted_modules:
-                        self.violations.append(f"Import of restricted module: {alias.name}")
-                self.generic_visit(node)
-            
-            def visit_ImportFrom(self, node):
-                if node.module and node.module in self.restricted_modules:
-                    self.violations.append(f"Import from restricted module: {node.module}")
-                self.generic_visit(node)
-            
-            def visit_Call(self, node):
-                # Check for dangerous function calls
-                if isinstance(node.func, ast.Name):
-                    if node.func.id in {'exec', 'eval', 'compile'}:
-                        self.violations.append(f"Dangerous function call: {node.func.id}")
-                self.generic_visit(node)
+        # Check for basic strategy structure indicators
+        strategy_lower = strategy.lower()
+        has_steps = any(indicator in strategy_lower for indicator in [
+            'step', 'first', 'then', 'next', 'finally', 'search', 'analyze'
+        ])
         
-        visitor = SecurityVisitor(self.restricted_modules)
-        visitor.visit(tree)
-        
+        if not has_steps:
+            issues.append("Strategy should include clear steps or actions")
+            
         return {
-            'safe': len(visitor.violations) == 0,
-            'reason': '; '.join(visitor.violations) if visitor.violations else None
+            'valid': len(issues) == 0,
+            'issues': issues
         }
-    
-    def _check_code_structure(self, tree: ast.AST) -> Dict[str, Any]:
-        """
-        Check code for required structural elements.
-        
-        Args:
-            tree: Parsed AST of code
-            
-        Returns:
-            Dict: Structure validation results
-        """
-        class StructureVisitor(ast.NodeVisitor):
-            def __init__(self):
-                self.has_execute_strategy = False
-                self.has_yield = False
-                self.function_params = []
-            
-            def visit_FunctionDef(self, node):
-                if node.name == 'execute_strategy':
-                    self.has_execute_strategy = True
-                    self.function_params = [arg.arg for arg in node.args.args]
-                    
-                    # Check for yield statements in function
-                    for child in ast.walk(node):
-                        if isinstance(child, ast.Yield):
-                            self.has_yield = True
-                            break
-                
-                self.generic_visit(node)
-        
-        visitor = StructureVisitor()
-        visitor.visit(tree)
-        
-        if not visitor.has_execute_strategy:
-            return {'valid': False, 'reason': 'Missing execute_strategy function'}
-        
-        if not visitor.has_yield:
-            return {'valid': False, 'reason': 'execute_strategy must use yield statements'}
-        
-        required_params = {'prompt', 'search_tool', 'llm_interface'}
-        if not required_params.issubset(set(visitor.function_params)):
-            return {
-                'valid': False, 
-                'reason': f'execute_strategy must accept parameters: {required_params}'
-            }
-        
-        return {'valid': True}
-    
-    def _validate_notification(self, notification: Any) -> bool:
-        """
-        Validate notification format and content.
-        
-        Args:
-            notification: Notification object from strategy
-            
-        Returns:
-            bool: True if notification is valid
-        """
-        if not isinstance(notification, dict):
-            return False
-        
-        required_fields = {'type', 'description', 'timestamp'}
-        if not required_fields.issubset(notification.keys()):
-            return False
-        
-        # Additional validation for specific notification types
-        if notification.get('type') == 'final_report':
-            if 'report' not in notification:
-                return False
-        
-        return True
-    
-    @contextmanager
-    def _timeout_context(self, seconds: int):
-        """
-        Context manager for execution timeout.
-        
-        Args:
-            seconds: Timeout duration
-        """
-        def timeout_handler(signum, frame):
-            raise ExecutionTimeout(f"Execution exceeded {seconds} seconds")
-        
-        # Set up timeout signal
-        if hasattr(signal, 'SIGALRM'):  # Unix systems
-            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(seconds)
-            try:
-                yield
-            finally:
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, old_handler)
-        else:
-            # Windows fallback - no timeout (or implement threading-based timeout)
-            yield
 
 
-class CodeAnalyzer:
-    """Utility class for analyzing generated strategy code."""
+# Utility functions for common strategy patterns
+def extract_strategy_steps(strategy: str) -> list:
+    """
+    Extract numbered or bulleted steps from strategy text.
     
-    @staticmethod
-    def extract_function_info(code: str) -> Dict[str, Any]:
-        """
-        Extract information about the execute_strategy function.
+    Args:
+        strategy: Natural language strategy
         
-        Args:
-            code: Python code containing strategy function
-            
-        Returns:
-            Dict: Function analysis results
-        """
-        try:
-            tree = ast.parse(code)
-            
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == 'execute_strategy':
-                    return {
-                        'parameters': [arg.arg for arg in node.args.args],
-                        'has_docstring': ast.get_docstring(node) is not None,
-                        'line_count': node.end_lineno - node.lineno if hasattr(node, 'end_lineno') else 0,
-                        'yield_count': sum(1 for child in ast.walk(node) if isinstance(child, ast.Yield))
-                    }
-            
-            return {'error': 'execute_strategy function not found'}
-            
-        except Exception as e:
-            return {'error': f'Analysis failed: {str(e)}'}
+    Returns:
+        list: Individual strategy steps
+    """
+    # Look for numbered steps (1., 2., etc.)
+    numbered_pattern = r'^\s*\d+\.?\s*(.+)$'
+    numbered_steps = re.findall(numbered_pattern, strategy, re.MULTILINE)
     
-    @staticmethod
-    def estimate_complexity(code: str) -> str:
-        """
-        Estimate complexity of generated strategy code.
+    if numbered_steps:
+        return numbered_steps
         
-        Args:
-            code: Strategy code to analyze
-            
-        Returns:
-            str: Complexity level (low, medium, high)
-        """
-        try:
-            tree = ast.parse(code)
-            
-            # Count various complexity indicators
-            loop_count = sum(1 for node in ast.walk(tree) 
-                           if isinstance(node, (ast.For, ast.While)))
-            
-            condition_count = sum(1 for node in ast.walk(tree) 
-                                if isinstance(node, (ast.If, ast.IfExp)))
-            
-            call_count = sum(1 for node in ast.walk(tree) 
-                           if isinstance(node, ast.Call))
-            
-            total_score = loop_count * 3 + condition_count * 2 + call_count
-            
-            if total_score < 10:
-                return 'low'
-            elif total_score < 25:
-                return 'medium'
-            else:
-                return 'high'
-                
-        except Exception:
-            return 'unknown'
+    # Look for bulleted steps (-, *, •, etc.)
+    bullet_pattern = r'^\s*[-*•]\s*(.+)$'
+    bullet_steps = re.findall(bullet_pattern, strategy, re.MULTILINE)
+    
+    if bullet_steps:
+        return bullet_steps
+        
+    # Fall back to sentence splitting
+    sentences = [s.strip() for s in strategy.split('.') if s.strip()]
+    return sentences[:10]  # Limit to prevent excessive steps
+
+
+def estimate_strategy_complexity(strategy: str) -> str:
+    """
+    Estimate complexity level of a research strategy.
+    
+    Args:
+        strategy: Natural language strategy
+        
+    Returns:
+        str: Complexity level (minimal, moderate, intensive)
+    """
+    word_count = len(strategy.split())
+    step_count = len(extract_strategy_steps(strategy))
+    
+    complexity_indicators = [
+        'iterate', 'loop', 'multiple', 'comprehensive', 'detailed',
+        'cross-reference', 'validate', 'extensive', 'thorough'
+    ]
+    
+    indicator_count = sum(1 for indicator in complexity_indicators 
+                         if indicator in strategy.lower())
+    
+    if word_count < 100 and step_count <= 5 and indicator_count <= 1:
+        return 'minimal'
+    elif word_count > 300 or step_count > 10 or indicator_count > 3:
+        return 'intensive'
+    else:
+        return 'moderate'
