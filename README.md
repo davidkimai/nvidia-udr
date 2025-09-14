@@ -28,7 +28,7 @@ for notification in quick_research("benefits of renewable energy", "minimal"):
 ## Installation
 
 ```bash
-git clone https://github.com/your-username/universal-deep-research
+git clone https://github.com/davidkimai/universal-deep-research
 cd universal-deep-research
 pip install -r requirements.txt
 ```
